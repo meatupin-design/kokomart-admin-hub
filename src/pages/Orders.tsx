@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { AdminLayout } from "@/components/layout/AdminLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,16 +16,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Eye, ChevronRight, Check, User, MapPin, FileText, Package, CreditCard, Clock } from "lucide-react";
+import { Search, Eye, ChevronRight, ChevronDown, ChevronUp, Check, User, MapPin, FileText, Package, CreditCard, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, doc, updateDoc, getDocs, query, where, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, doc, updateDoc, getDocs, getDoc, query, where, orderBy } from "firebase/firestore";
 
 interface OrderItem {
   name: string;
   quantity: number;
   price: number;
   cuttingType?: string;
+}
+
+interface DeliveryPartner {
+  id: string;
+  name: string;
+  phone: string;
+  vehicle?: string;
+  avatar?: string;
 }
 
 interface Order {
@@ -43,6 +51,8 @@ interface Order {
   address: string;
   createdAt: string;
   note?: string;
+  deliveryPartner?: DeliveryPartner;
+  actualPaymentMode?: string;
 }
 
 const statusFlow = ["RECEIVED", "CUTTING", "PACKING", "OUT_FOR_DELIVERY", "DELIVERED"];
@@ -101,6 +111,86 @@ export default function Orders() {
             } catch (e) { console.error(e); }
           }
 
+          // Fetch delivery partner data
+          let deliveryPartner: DeliveryPartner | undefined = undefined;
+          const partnerId = getSafeId(data.partner_id) || getSafeId(data.claimed_by) || getSafeId(data.delivery_partner_id) || getSafeId(data.delivery_person_id) || getSafeId(data.driver_id);
+
+          if (partnerId) {
+            console.log(`[DEBUG-ORDER] Order ${docSnap.id}: Detected partnerId: ${partnerId}`);
+            try {
+              // Try delivery_partners collection first
+              const partnerDoc = await getDoc(doc(db, "delivery_partners", partnerId));
+              if (partnerDoc.exists()) {
+                const pData = partnerDoc.data();
+                console.log(`[DEBUG-ORDER] Partner found in delivery_partners:`, pData);
+                deliveryPartner = {
+                  id: partnerId,
+                  name: pData.name || "Unknown Partner",
+                  phone: pData.phone || "",
+                  vehicle: pData.vehicle || "",
+                  avatar: pData.avatar || ""
+                };
+              } else {
+                // Try singular delivery_partner
+                const partnerDoc2 = await getDoc(doc(db, "delivery_partner", partnerId));
+                if (partnerDoc2.exists()) {
+                   const pData = partnerDoc2.data();
+                   console.log(`[DEBUG-ORDER] Partner found in delivery_partner (singular):`, pData);
+                   deliveryPartner = {
+                     id: partnerId,
+                     name: pData.name || "Unknown Partner",
+                     phone: pData.phone || "",
+                     avatar: pData.avatar || ""
+                   };
+                } else {
+                  // Try 'partners'
+                  const partnerDoc3 = await getDoc(doc(db, "partners", partnerId));
+                  if (partnerDoc3.exists()) {
+                    const pData = partnerDoc3.data();
+                    console.log(`[DEBUG-ORDER] Partner found in partners:`, pData);
+                    deliveryPartner = {
+                      id: partnerId,
+                      name: pData.name || "Unknown Partner",
+                      phone: pData.phone || "",
+                      avatar: pData.avatar || ""
+                    };
+                  } else {
+                    // Try searching in users collection - try direct doc reference first (uid)
+                    const userDoc = await getDoc(doc(db, "users", partnerId));
+                    if (userDoc.exists()) {
+                      const pData = userDoc.data();
+                      console.log(`[DEBUG-ORDER] Partner found in users collection:`, pData);
+                      deliveryPartner = {
+                        id: partnerId,
+                        name: pData.name || "Unknown Partner",
+                        phone: pData.phone || "",
+                        avatar: pData.avatar || ""
+                      };
+                    } else {
+                      // Fallback to query by id field
+                      const partnerQuery = query(collection(db, "users"), where("id", "==", partnerId));
+                      const partnerSnap = await getDocs(partnerQuery);
+                      if (!partnerSnap.empty) {
+                        const pData = partnerSnap.docs[0].data();
+                        console.log(`[DEBUG-ORDER] Partner found in users collection (query):`, pData);
+                        deliveryPartner = {
+                          id: partnerId,
+                          name: pData.name || "Unknown Partner",
+                          phone: pData.phone || "",
+                          avatar: pData.avatar || ""
+                        };
+                      } else {
+                        console.error(`[DEBUG-ORDER] Partner ${partnerId} NOT FOUND in any collection.`);
+                      }
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              console.error("Error fetching delivery partner:", e);
+            }
+          }
+
           // Map items
           const items = (data.items || []).map((item: any) => ({
             name: item.name,
@@ -121,11 +211,13 @@ export default function Orders() {
             discount: data.discount || 0,
             walletUsed: data.wallet_used || 0,
             finalAmount: data.final_amount || 0,
-            paymentMethod: "Online", // Defaulting as not present
+            paymentMethod: (data.payment_method || data.payment_mode || "Online") === "cod" ? "COD" : (data.payment_method || data.payment_mode || "Online"),
             status,
             address,
             createdAt: new Date(data.created_at).toLocaleString(),
-            note: data.note || ""
+            note: data.note || "",
+            deliveryPartner,
+            actualPaymentMode: data.actual_payment_mode || ""
           } as Order;
         }));
 
@@ -167,6 +259,13 @@ export default function Orders() {
     return currentIndex < statusFlow.length - 1 ? statusFlow[currentIndex + 1] : null;
   };
 
+  const getSafeId = (id: any): string | null => {
+    if (!id) return null;
+    if (typeof id === "string") return id;
+    if (typeof id === "object" && "id" in id) return id.id; // Firestore DocumentReference
+    return null;
+  };
+
   return (
     <AdminLayout title="Orders" subtitle="Manage order lifecycle">
       {/* Filters */}
@@ -205,6 +304,7 @@ export default function Orders() {
               <th>Amount</th>
               <th>Payment</th>
               <th>Status</th>
+              <th>Delivery</th>
               <th>Time</th>
               <th>Actions</th>
             </tr>
@@ -227,6 +327,16 @@ export default function Orders() {
                   <span className={cn("status-badge", statusStyles[order.status])}>
                     {statusLabels[order.status]}
                   </span>
+                </td>
+                <td>
+                  {order.deliveryPartner ? (
+                    <div>
+                      <p className="font-medium text-sm">{order.deliveryPartner.name}</p>
+                      <p className="text-xs text-muted-foreground">{order.deliveryPartner.phone}</p>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">Not Assigned</span>
+                  )}
                 </td>
                 <td className="text-sm text-muted-foreground">{order.createdAt}</td>
                 <td>
@@ -332,6 +442,52 @@ export default function Orders() {
                       <p className="text-sm leading-relaxed" style={{ color: 'hsl(var(--foreground))' }}>{selectedOrder.address || "No address provided"}</p>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Delivery Partner Info */}
+              {selectedOrder.deliveryPartner && (
+                <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'hsl(var(--border))' }}>
+                  <div className="px-4 py-2.5 flex items-center gap-2 border-b" style={{ background: 'hsl(var(--muted) / 0.5)', borderColor: 'hsl(var(--border))' }}>
+                    <div className="h-4 w-4 rounded-full bg-success/20 flex items-center justify-center">
+                      <div className="h-1.5 w-1.5 rounded-full bg-success" />
+                    </div>
+                    <h4 className="text-sm font-semibold tracking-wide uppercase" style={{ color: 'hsl(var(--foreground))' }}>Delivery Personnel</h4>
+                  </div>
+                  <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4" style={{ background: 'hsl(var(--card))' }}>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'hsl(var(--muted-foreground))' }}>Name & Contact</p>
+                      <p className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>{selectedOrder.deliveryPartner.name}</p>
+                      <p className="text-sm mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>{selectedOrder.deliveryPartner.phone}</p>
+                    </div>
+                    {selectedOrder.deliveryPartner.vehicle && (
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'hsl(var(--muted-foreground))' }}>Vehicle Details</p>
+                        <p className="text-sm leading-relaxed" style={{ color: 'hsl(var(--foreground))' }}>{selectedOrder.deliveryPartner.vehicle}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+
+              {/* Payment Details */}
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'hsl(var(--border))' }}>
+                <div className="px-4 py-2.5 flex items-center gap-2 border-b" style={{ background: 'hsl(var(--muted) / 0.5)', borderColor: 'hsl(var(--border))' }}>
+                  <CreditCard className="h-4 w-4" style={{ color: 'hsl(var(--primary))' }} />
+                  <h4 className="text-sm font-semibold tracking-wide uppercase" style={{ color: 'hsl(var(--foreground))' }}>Payment Information</h4>
+                </div>
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4" style={{ background: 'hsl(var(--card))' }}>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'hsl(var(--muted-foreground))' }}>Payment Method</p>
+                    <Badge variant="outline" className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>{selectedOrder.paymentMethod}</Badge>
+                  </div>
+                  {selectedOrder.actualPaymentMode && (
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-wider mb-1" style={{ color: 'hsl(var(--muted-foreground))' }}>Actual Payment Mode</p>
+                      <p className="font-semibold" style={{ color: 'hsl(var(--foreground))' }}>{selectedOrder.actualPaymentMode}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
