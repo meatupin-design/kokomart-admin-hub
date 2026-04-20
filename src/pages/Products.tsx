@@ -92,6 +92,10 @@ const DEFAULT_CATEGORIES = [
   "Halal Chicken",
   "Eggs",
   "Beef",
+  "Farm Pig",
+  "Farm Goat",
+  "Farm Rabbit",
+  "Farm Duck"
 ];
 
 // Initial products removed, fetching from Firebase
