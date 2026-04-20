@@ -26,6 +26,8 @@ interface OrderItem {
   quantity: number;
   price: number;
   cuttingType?: string;
+  weight?: number | string;
+  unit?: string;
 }
 
 interface DeliveryPartner {
@@ -45,6 +47,9 @@ interface Order {
   subtotal: number;
   discount: number;
   walletUsed: number;
+  deliveryFee: number;
+  taxAmount: number;
+  platformFee: number;
   finalAmount: number;
   paymentMethod: string;
   status: string;
@@ -196,7 +201,9 @@ export default function Orders() {
             name: item.name,
             quantity: item.quantity,
             price: item.price,
-            cuttingType: item.cuttingType
+            cuttingType: item.cuttingType,
+            weight: item.weight,
+            unit: item.unit
           }));
 
           const status = (data.status || "RECEIVED").toUpperCase();
@@ -210,6 +217,9 @@ export default function Orders() {
             subtotal: data.total_amount || 0,
             discount: data.discount || 0,
             walletUsed: data.wallet_used || 0,
+            deliveryFee: data.delivery_fee || 0,
+            taxAmount: data.tax_amount || 0,
+            platformFee: data.platform_fee || 0,
             finalAmount: data.final_amount || 0,
             paymentMethod: (data.payment_method || data.payment_mode || "Online") === "cod" ? "COD" : (data.payment_method || data.payment_mode || "Online"),
             status,
@@ -509,9 +519,36 @@ export default function Orders() {
                 <div className="px-4 py-2.5 flex items-center gap-2 border-b" style={{ background: 'hsl(var(--muted) / 0.5)', borderColor: 'hsl(var(--border))' }}>
                   <Package className="h-4 w-4" style={{ color: 'hsl(var(--primary))' }} />
                   <h4 className="text-sm font-semibold tracking-wide uppercase" style={{ color: 'hsl(var(--foreground))' }}>Order Items</h4>
-                  <span className="ml-auto text-xs font-semibold rounded-full px-2 py-0.5" style={{ background: 'hsl(var(--primary) / 0.12)', color: 'hsl(var(--primary))' }}>
-                    {selectedOrder.items.length} {selectedOrder.items.length === 1 ? 'item' : 'items'}
-                  </span>
+                  <div className="ml-auto flex items-center gap-2">
+                    {(() => {
+                      let totalGrams = 0;
+                      let hasWeight = false;
+                      selectedOrder.items.forEach(item => {
+                        if (item.weight) {
+                          hasWeight = true;
+                          const w = typeof item.weight === 'string' ? parseFloat(item.weight) : item.weight;
+                          const qty = item.quantity || 1;
+                          if (item.unit?.toLowerCase() === 'kg') {
+                            totalGrams += w * qty * 1000;
+                          } else if (item.unit?.toLowerCase() === 'gm' || item.unit?.toLowerCase() === 'g') {
+                            totalGrams += w * qty;
+                          }
+                        }
+                      });
+                      if (!hasWeight) return null;
+                      const displayWeight = totalGrams >= 1000 
+                        ? `${(totalGrams / 1000).toFixed(2)} kg`
+                        : `${totalGrams} gm`;
+                      return (
+                        <span className="text-xs font-semibold rounded-full px-2 py-0.5 bg-success/10 text-success">
+                           Total Weight: {displayWeight}
+                        </span>
+                      );
+                    })()}
+                    <span className="text-xs font-semibold rounded-full px-2 py-0.5" style={{ background: 'hsl(var(--primary) / 0.12)', color: 'hsl(var(--primary))' }}>
+                      {selectedOrder.items.length} {selectedOrder.items.length === 1 ? 'item' : 'items'}
+                    </span>
+                  </div>
                 </div>
                 <div style={{ background: 'hsl(var(--card))' }}>
                   {selectedOrder.items.map((item, index) => (
@@ -530,8 +567,13 @@ export default function Orders() {
                         </div>
                         <div>
                           <p className="font-medium text-sm" style={{ color: 'hsl(var(--foreground))' }}>{item.name}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>Qty: {item.quantity}</span>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <span className="text-xs font-medium px-2 py-0.5 rounded bg-muted/60" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                              Qty: {item.quantity}
+                              {item.weight && (
+                                <> • {item.weight} {item.unit?.toLowerCase()}{item.quantity > 1 ? ` x ${item.quantity}` : ''}</>
+                              )}
+                            </span>
                             {item.cuttingType && (
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                                 style={{ background: 'hsl(var(--secondary))', color: 'hsl(var(--secondary-foreground))' }}>
@@ -558,6 +600,24 @@ export default function Orders() {
                     <span style={{ color: 'hsl(var(--muted-foreground))' }}>Subtotal</span>
                     <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>₹{selectedOrder.subtotal.toLocaleString()}</span>
                   </div>
+                  {selectedOrder.deliveryFee > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span style={{ color: 'hsl(var(--muted-foreground))' }}>Delivery Fee</span>
+                      <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>₹{selectedOrder.deliveryFee.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {selectedOrder.taxAmount > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span style={{ color: 'hsl(var(--muted-foreground))' }}>Tax</span>
+                      <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>₹{selectedOrder.taxAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {selectedOrder.platformFee > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span style={{ color: 'hsl(var(--muted-foreground))' }}>Platform Fee</span>
+                      <span className="font-medium" style={{ color: 'hsl(var(--foreground))' }}>₹{selectedOrder.platformFee.toLocaleString()}</span>
+                    </div>
+                  )}
                   {selectedOrder.discount > 0 && (
                     <div className="flex justify-between text-sm">
                       <span style={{ color: 'hsl(141 73% 35%)' }}>Discount Applied</span>
