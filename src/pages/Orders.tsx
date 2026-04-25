@@ -203,7 +203,8 @@ export default function Orders() {
             price: item.price,
             cuttingType: item.cuttingType,
             weight: item.weight,
-            unit: item.unit
+            unit: item.unit,
+            price_per_selection: item.price_per_selection || false
           }));
 
           const status = (data.status || "RECEIVED").toUpperCase();
@@ -583,7 +584,27 @@ export default function Orders() {
                           </div>
                         </div>
                       </div>
-                      <p className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>₹{item.price.toLocaleString()}</p>
+                      <p className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>
+                        ₹{(() => {
+                          let effectivePrice = item.price;
+                          const weight = typeof item.weight === 'string' ? parseFloat(item.weight) : (item.weight || 0);
+                          const unit = item.unit?.toLowerCase() || "";
+
+                          if ((item as any).price_per_selection) {
+                            return (item.price * item.quantity).toLocaleString();
+                          }
+
+                          if (weight > 0) {
+                            if (unit === 'kg') {
+                              effectivePrice = item.price * weight;
+                            } else if (unit === 'gm' || unit === 'g') {
+                              effectivePrice = (item.price * weight) / 1000;
+                            }
+                          }
+                          
+                          return (effectivePrice * item.quantity).toLocaleString();
+                        })()}
+                      </p>
                     </div>
                   ))}
                 </div>
