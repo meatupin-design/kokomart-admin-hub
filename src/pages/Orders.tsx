@@ -101,7 +101,15 @@ export default function Orders() {
           // Fetch user data
           let customer = "Unknown";
           let phone = "";
-          let address = "";
+          
+          // 1. Try to get address from the order document first
+          let address = data.address || "";
+          if (address && typeof address === 'object') {
+            const a = address as any;
+            address = [a.house_no || a.house || a.flat_no, a.street, a.landmark, a.area, a.city, a.pincode]
+              .filter(Boolean)
+              .join(", ");
+          }
 
           if (data.user_id) {
             try {
@@ -111,7 +119,10 @@ export default function Orders() {
                 const userData = userSnap.docs[0].data();
                 customer = userData.name || "Unknown";
                 phone = userData.phone || "";
-                address = userData.address || "";
+                // 2. Fallback to user profile address only if order address is missing
+                if (!address) {
+                  address = userData.address || "";
+                }
               }
             } catch (e) { console.error(e); }
           }
