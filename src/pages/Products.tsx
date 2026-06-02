@@ -21,11 +21,25 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus, Pencil, TrendingUp, TrendingDown, Minus, Search, Trash2, Eye } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Search,
+  Trash2,
+  Eye,
+  Check,
+  X,
+  SlidersHorizontal,
+  Clock,
+} from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/firebase";
-import { collection, onSnapshot, addDoc, updateDoc, doc, deleteDoc } from "firebase/firestore";
+import { collection, onSnapshot, addDoc, updateDoc, doc, deleteDoc, writeBatch, setDoc } from "firebase/firestore";
+import { useToast } from "@/hooks/use-toast";
 
 interface Product {
   id: string;
@@ -101,6 +115,8 @@ const DEFAULT_CATEGORIES = [
 // Initial products removed, fetching from Firebase
 
 export default function Products() {
+  const { toast } = useToast();
+  const [isUpdatingBulk, setIsUpdatingBulk] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -108,6 +124,77 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [isViewDetailsOpen, setIsViewDetailsOpen] = useState(false);
+
+  const anyInStock = products.some((p) => p.availability);
+  const [openingTime, setOpeningTime] = useState("9:00 AM");
+
+  useEffect(() => {
+    const unsubSettings = onSnapshot(doc(db, "settings", "store"), (docSnap) => {
+      if (docSnap.exists()) {
+        setOpeningTime(docSnap.data().opening_time || "9:00 AM");
+      } else {
+        setOpeningTime("9:00 AM");
+      }
+    });
+    return () => unsubSettings();
+  }, []);
+
+  const handleUpdateOpeningTime = async (time: string) => {
+    const finalTime = time.trim() || "9:00 AM";
+    try {
+      await setDoc(doc(db, "settings", "store"), {
+        opening_time: finalTime
+      }, { merge: true });
+      toast({
+        title: "Opening Time Updated",
+        description: `Next opening time set to: ${finalTime}`,
+      });
+    } catch (e) {
+      console.error("Error setting opening time:", e);
+      toast({
+        variant: "destructive",
+        title: "Failed to Update",
+        description: "Something went wrong while saving the opening time.",
+      });
+    }
+  };
+
+  const handleToggleBulkAvailability = async () => {
+    if (products.length === 0) {
+      toast({
+        title: "No products found",
+        description: "There are no products in the catalog to update.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const targetAvailability = !anyInStock;
+    const actionText = targetAvailability ? "In Stock" : "Out of Stock";
+
+    setIsUpdatingBulk(true);
+    try {
+      const batch = writeBatch(db);
+      products.forEach((p) => {
+        const productRef = doc(db, "products", p.id);
+        batch.update(productRef, { availability: targetAvailability });
+      });
+      await batch.commit();
+      toast({
+        title: "Bulk Update Successful",
+        description: `All ${products.length} products have been marked as ${actionText}.`,
+      });
+    } catch (e) {
+      console.error("Error updating products availability:", e);
+      toast({
+        variant: "destructive",
+        title: "Bulk Update Failed",
+        description: "Something went wrong while performing the bulk update.",
+      });
+    } finally {
+      setIsUpdatingBulk(false);
+    }
+  };
 
   const filteredProducts = products.filter((product) => {
     const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
@@ -274,13 +361,54 @@ export default function Products() {
             </SelectContent>
           </Select>
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => setEditingProduct(null)}>
-              <Plus className="h-4 w-4" />
-              Add Product
-            </Button>
-          </DialogTrigger>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl border bg-muted/20 hover:bg-muted/40 transition-all duration-200">
+            <Switch
+              id="bulk-availability-toggle"
+              checked={anyInStock}
+              disabled={isUpdatingBulk || products.length === 0}
+              onCheckedChange={handleToggleBulkAvailability}
+              className="data-[state=checked]:bg-success data-[state=unchecked]:bg-destructive"
+            />
+            <div className="flex flex-col select-none pr-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground leading-none mb-0.5">Bulk Stock</span>
+              <span className={cn(
+                "text-xs font-bold leading-none transition-colors duration-200",
+                isUpdatingBulk
+                  ? "text-muted-foreground"
+                  : anyInStock
+                  ? "text-success"
+                  : "text-destructive"
+              )}>
+                {isUpdatingBulk ? "Updating..." : anyInStock ? "Active / In Stock" : "All Out of Stock"}
+              </span>
+            </div>
+          </div>
+
+          <div className="relative w-64">
+            <Clock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={openingTime}
+              onChange={(e) => setOpeningTime(e.target.value)}
+              onBlur={() => handleUpdateOpeningTime(openingTime)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleUpdateOpeningTime(openingTime);
+                  e.currentTarget.blur();
+                }
+              }}
+              placeholder="Opening Time (e.g. Tomorrow 9 AM)"
+              className="pl-9 pr-3 h-10 w-full focus-visible:ring-primary/40"
+            />
+          </div>
+
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={() => setEditingProduct(null)}>
+                <Plus className="h-4 w-4" />
+                Add Product
+              </Button>
+            </DialogTrigger>
           <DialogContent className="w-full max-w-2xl max-h-[90vh] p-0 gap-0 rounded-2xl border-0 shadow-2xl overflow-hidden flex flex-col">
             {/* Header */}
             <div className="gradient-primary p-5 pr-12">
@@ -447,6 +575,7 @@ export default function Products() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
 
         {/* View Product Details Dialog */}
         <Dialog open={isViewDetailsOpen} onOpenChange={setIsViewDetailsOpen}>

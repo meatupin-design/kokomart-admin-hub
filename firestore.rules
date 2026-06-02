@@ -26,6 +26,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
     // Users:
     // - Users can read and write their own profile
     // - Admins can read all users and update wallets
