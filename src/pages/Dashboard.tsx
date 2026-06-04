@@ -76,6 +76,8 @@ export default function Dashboard() {
       }
 
       orders.forEach((data: any) => {
+        if (data.status === "cancelled") return;
+
         const createdAt = data.created_at;
         redeemedTotal += (data.wallet_used || 0);
 

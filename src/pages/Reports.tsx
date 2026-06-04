@@ -34,7 +34,7 @@ export default function Reports() {
   useEffect(() => {
     // Orders Listener
     const ordersUnsub = onSnapshot(collection(db, "orders"), (snapshot) => {
-      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter((o: any) => o.status !== "cancelled");
 
       // Filter for last 7 days (simplified for "weekly" default)
       const daysToLoookback = period === 'monthly' ? 30 : (period === 'daily' ? 1 : 7);
