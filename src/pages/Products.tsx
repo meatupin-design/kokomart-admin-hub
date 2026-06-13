@@ -56,6 +56,7 @@ interface Product {
   cuttingTypes?: string[];
   unit?: string;
   availableDays?: number[]; // 0=Sun, 1=Mon, ..., 6=Sat. Empty/undefined = all days
+  timelineSlots?: string[]; // Empty/undefined = all slots
   displayOrder?: number; // customer-facing sort order, lower = shown first
 }
 
@@ -126,6 +127,10 @@ export default function Products() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [isViewDetailsOpen, setIsViewDetailsOpen] = useState(false);
+
+  const [timelineSlotFrom, setTimelineSlotFrom] = useState("");
+  const [timelineSlotTo, setTimelineSlotTo] = useState("");
+  const [currentTimelineSlots, setCurrentTimelineSlots] = useState<string[]>([]);
 
   const anyInStock = products.some((p) => p.availability);
   const [openingTime, setOpeningTime] = useState("9:00 AM");
@@ -223,6 +228,7 @@ export default function Products() {
           cuttingTypes: Array.isArray(data.cutting_types) ? data.cutting_types : [],
           unit: data.unit || "KG",
           availableDays: Array.isArray(data.available_days) ? data.available_days : [],
+          timelineSlots: Array.isArray(data.timeline_slots) ? data.timeline_slots : [],
           displayOrder: typeof data.display_order === "number" ? data.display_order : 9999,
         } as Product;
       });
@@ -251,6 +257,9 @@ export default function Products() {
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
+    setCurrentTimelineSlots(product.timelineSlots || []);
+    setTimelineSlotFrom("");
+    setTimelineSlotTo("");
     setIsDialogOpen(true);
   };
 
@@ -282,6 +291,7 @@ export default function Products() {
 
         const availableDaysRaw = formData.getAll("availableDays");
         const availableDaysParsed = availableDaysRaw.map(Number);
+        const timelineSlotsRaw = formData.getAll("timelineSlots") as string[];
 
         await updateDoc(doc(db, "products", editingProduct.id), {
           name,
@@ -296,12 +306,14 @@ export default function Products() {
           cutting_types: cuttingTypes,
           unit,
           available_days: availableDaysParsed,
+          timeline_slots: timelineSlotsRaw,
           display_order: displayOrder,
         });
 
       } else {
         const availableDaysRaw = formData.getAll("availableDays");
         const availableDaysParsed = availableDaysRaw.map(Number);
+        const timelineSlotsRaw = formData.getAll("timelineSlots") as string[];
 
         await addDoc(collection(db, "products"), {
           name,
@@ -316,6 +328,7 @@ export default function Products() {
           cutting_types: cuttingTypes,
           unit,
           available_days: availableDaysParsed,
+          timeline_slots: timelineSlotsRaw,
           display_order: displayOrder,
           created_at: new Date().toISOString()
         });
@@ -406,7 +419,12 @@ export default function Products() {
 
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button onClick={() => setEditingProduct(null)}>
+              <Button onClick={() => {
+                setEditingProduct(null);
+                setCurrentTimelineSlots([]);
+                setTimelineSlotFrom("");
+                setTimelineSlotTo("");
+              }}>
                 <Plus className="h-4 w-4" />
                 Add Product
               </Button>
@@ -498,6 +516,8 @@ export default function Products() {
                               <SelectItem value="PC">PC</SelectItem>
                               <SelectItem value="liter">Liter</SelectItem>
                               <SelectItem value="dozen">Dozen</SelectItem>
+                              <SelectItem value="Full">Full</SelectItem>
+                              <SelectItem value="Half">Half</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -561,6 +581,77 @@ export default function Products() {
                           </div>
                         ))}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Timeline Slots */}
+                  <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'hsl(var(--border))' }}>
+                    <div className="px-4 py-2.5 border-b" style={{ background: 'hsl(var(--muted) / 0.5)', borderColor: 'hsl(var(--border))' }}>
+                      <h4 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'hsl(var(--primary))' }}>Timeline Slots</h4>
+                    </div>
+                    <div className="p-4 space-y-4" style={{ background: 'hsl(var(--card))' }}>
+                      <p className="text-xs" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        Add custom time slots for this product (e.g., "10:00 AM - 12:00 PM"). Leave empty to be available anytime.
+                      </p>
+
+                      <div className="flex gap-2 items-center">
+                        <Input
+                          value={timelineSlotFrom}
+                          onChange={(e) => setTimelineSlotFrom(e.target.value)}
+                          placeholder="From (e.g., 10:00 AM)"
+                          className="focus-visible:ring-primary/40"
+                        />
+                        <span className="text-muted-foreground font-medium text-sm">to</span>
+                        <Input
+                          value={timelineSlotTo}
+                          onChange={(e) => setTimelineSlotTo(e.target.value)}
+                          placeholder="To (e.g., 12:00 PM)"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              const newSlot = `${timelineSlotFrom.trim()} - ${timelineSlotTo.trim()}`;
+                              if (timelineSlotFrom.trim() && timelineSlotTo.trim() && !currentTimelineSlots.includes(newSlot)) {
+                                setCurrentTimelineSlots([...currentTimelineSlots, newSlot]);
+                                setTimelineSlotFrom("");
+                                setTimelineSlotTo("");
+                              }
+                            }
+                          }}
+                          className="focus-visible:ring-primary/40"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => {
+                            const newSlot = `${timelineSlotFrom.trim()} - ${timelineSlotTo.trim()}`;
+                            if (timelineSlotFrom.trim() && timelineSlotTo.trim() && !currentTimelineSlots.includes(newSlot)) {
+                              setCurrentTimelineSlots([...currentTimelineSlots, newSlot]);
+                              setTimelineSlotFrom("");
+                              setTimelineSlotTo("");
+                            }
+                          }}
+                        >
+                          Add
+                        </Button>
+                      </div>
+
+                      {currentTimelineSlots.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {currentTimelineSlots.map(slot => (
+                            <div key={slot} className="flex items-center gap-1.5 rounded-full pl-3 pr-1.5 py-1 text-sm font-medium" style={{ background: 'hsl(var(--secondary))', color: 'hsl(var(--secondary-foreground))' }}>
+                              <span>{slot}</span>
+                              <button
+                                type="button"
+                                onClick={() => setCurrentTimelineSlots(currentTimelineSlots.filter(s => s !== slot))}
+                                className="h-5 w-5 rounded-full flex items-center justify-center hover:bg-black/10 transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                              <input type="hidden" name="timelineSlots" value={slot} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </form>
@@ -676,6 +767,26 @@ export default function Products() {
                   </div>
                 </div>
 
+                {/* Timeline Slots */}
+                <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'hsl(var(--border))' }}>
+                  <div className="px-4 py-2.5 border-b" style={{ background: 'hsl(var(--muted) / 0.5)', borderColor: 'hsl(var(--border))' }}>
+                    <h4 className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'hsl(var(--primary))' }}>Timeline Slots</h4>
+                  </div>
+                  <div className="p-4" style={{ background: 'hsl(var(--card))' }}>
+                    {viewingProduct.timelineSlots && viewingProduct.timelineSlots.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {viewingProduct.timelineSlots.map(slot => (
+                          <span key={slot} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold" style={{ background: 'hsl(var(--primary) / 0.1)', color: 'hsl(var(--primary))' }}>
+                            {slot}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm font-medium" style={{ color: 'hsl(var(--foreground))' }}>Available all slots</p>
+                    )}
+                  </div>
+                </div>
+
                 {/* Cutting Types */}
                 {viewingProduct.cuttingTypes && viewingProduct.cuttingTypes.length > 0 && (
                   <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'hsl(var(--border))' }}>
@@ -764,6 +875,11 @@ export default function Products() {
                     {product.availableDays && product.availableDays.length > 0 && (
                       <span className="text-xs text-muted-foreground">
                         {product.availableDays.map(d => DAYS_OF_WEEK[d].label.slice(0, 3)).join(", ")} only
+                      </span>
+                    )}
+                    {product.timelineSlots && product.timelineSlots.length > 0 && (
+                      <span className="text-xs text-muted-foreground mt-0.5">
+                        {product.timelineSlots.join(", ")}
                       </span>
                     )}
                   </div>
